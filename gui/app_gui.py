@@ -1,6 +1,8 @@
 import tkinter as tk
 from tkinter import ttk, messagebox
 
+
+
 from crypto_core.aes_gcm import (
     encrypt_aes_gcm,
     decrypt_aes_gcm,
@@ -27,6 +29,13 @@ class SecureMessagingApp(tk.Tk):
         # RSA KEYS
         self.sender_private_key, self.sender_public_key = generate_rsa_keypair()
         self.receiver_private_key, self.receiver_public_key = generate_rsa_keypair()
+
+         # Flooding attack counter
+
+        self.decrypt_attempts = 0
+         
+
+
         self.seen_nonces = set()
 
 
@@ -75,9 +84,9 @@ class SecureMessagingApp(tk.Tk):
         self.log_text.config(state="disabled")
         self.log_text.see("end")
 
-    # -------------------------------
-    #  ENCRYPT  (AES + RSA WRAP)
-    # -------------------------------
+
+    #  ENCRYPT  AES + RSA WRAP
+    
     def on_encrypt_clicked(self):
         plaintext = self.sender_text.get("1.0", "end").strip()
         if not plaintext:
@@ -85,23 +94,22 @@ class SecureMessagingApp(tk.Tk):
             return
 
         try:
-            # 1) Encrypt plaintext using AES-GCM
+            # Encrypt plaintext using AES-GCM
             aes = encrypt_aes_gcm(plaintext)
 
-            # 2) Wrap AES key with Receiver's RSA public key
+            # Wrap AES key with Receiver's RSA public key
             wrapped = wrap_aes_key(aes.key, self.receiver_public_key)
 
-            # 3) Create data to sign (nonce + ciphertext)
+          
             data_to_sign = aes.nonce + aes.ciphertext
 
-            # 4) Sign using Sender's private key
-            # 4) Sign using Sender's private key  ✅
+            # Sign using Sender's private key
             signature = sign_message(self.sender_private_key, data_to_sign)
 
             
 
 
-            # 5) Bundle everything
+
             bundle = encode_secure_bundle(
                 wrapped,
                 aes.nonce,
@@ -109,9 +117,11 @@ class SecureMessagingApp(tk.Tk):
                 signature,
             )
 
-            # 6) "Send" to receiver area
+           
             self.receiver_text.delete("1.0", "end")
             self.receiver_text.insert("1.0", bundle)
+
+            self.decrypt_attempts = 0
 
             self.log("[Sender] AES-GCM + RSA wrapping + digital signature created.")
         except Exception as e:
@@ -119,13 +129,22 @@ class SecureMessagingApp(tk.Tk):
             messagebox.showerror("Error", f"Encrypt/sign failed: {e}")
 
 
-    # -------------------------------
-    #  DECRYPT  (RSA UNWRAP + AES)
-    # -------------------------------
+    
+    #  DECRYPT RSA UNWRAP + AES
     def on_decrypt_clicked(self):
         bundle_str = self.receiver_text.get("1.0", "end").strip()
         if not bundle_str:
             messagebox.showwarning("Warning", "Paste ciphertext first!")
+            return
+
+        # Flooding Attack Detection
+        self.decrypt_attempts += 1
+        if self.decrypt_attempts > 5:  
+            self.log("[Receiver] Flooding attack detected! Too many decrypt attempts.")
+            messagebox.showerror(
+                "Flooding Attack",
+                "Too many decrypt attempts! Possible flooding attack."
+            )
             return
 
         try:
@@ -135,14 +154,16 @@ class SecureMessagingApp(tk.Tk):
             # Replay Attack Detection 
             if bundle.nonce in self.seen_nonces:
                 self.log("[Receiver] Replay detected! Nonce reused.")
-                messagebox.showerror("Replay Attack", "This message was already received before!")
+                messagebox.showerror(
+                    "Replay Attack",
+                    "This message was already received before!"
+                )
                 return
+
+            
             self.seen_nonces.add(bundle.nonce)
 
-
-
-
-            # 2) Verify signature (using Sender's public key)
+            # 2 Verify signature using Sender's public key
             data_to_verify = bundle.nonce + bundle.ciphertext
             is_valid = verify_signature(
                 self.sender_public_key,
@@ -160,11 +181,10 @@ class SecureMessagingApp(tk.Tk):
 
             self.log("[Receiver] Signature verification success.")
 
-            # 3) Unwrap AES key using Receiver's private key
-            aes_key = unwrap_aes_key(bundle.wrapped_key, self.sender_private_key)
+            # 3 Unwrap AES key using Receiver's private key
+            aes_key = unwrap_aes_key(bundle.wrapped_key, self.receiver_private_key)
 
-            
-            # 4) Decrypt using AES-GCM
+            # 4 Decrypt using AES-GCM
             plaintext = decrypt_aes_gcm(aes_key, bundle.nonce, bundle.ciphertext)
 
             self.log("[Receiver] RSA unwrap + AES-GCM decrypt success.")
@@ -172,4 +192,3 @@ class SecureMessagingApp(tk.Tk):
         except Exception as e:
             self.log(f"[Error] Unwrap/decrypt/verify: {e}")
             messagebox.showerror("Error", f"Unwrap/decrypt/verify failed: {e}")
-

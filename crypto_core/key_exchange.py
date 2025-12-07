@@ -9,7 +9,7 @@ class SecureMessageBundle:
     wrapped_key: bytes
     nonce: bytes
     ciphertext: bytes
-    signature: bytes  # NEW: digital signature
+    signature: bytes  
 
 
 def generate_rsa_keypair():
